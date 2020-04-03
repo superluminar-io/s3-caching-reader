@@ -42,7 +42,7 @@ func (r *CachingS3Reader) Read(p []byte) (n int, err error) {
 	if r.done {
 		return 0, io.EOF
 	}
-	item, err := r.fetchFromS3(r.key)
+	item, err := r.fetchFromS3()
 	if err != nil {
 		return 0, err
 	}
@@ -65,17 +65,18 @@ func (r *CachingS3Reader) Read(p []byte) (n int, err error) {
 	return stringReader.Read(p)
 }
 
-func (r *CachingS3Reader) fetchFromS3(key string) (string, error) {
+func (r CachingS3Reader) fetchFromS3() (string, error) {
 	modifiedSince := modifiedSinceSeconds(r.cacheSeconds)
-	_, err := r.s3Client.HeadObject(&s3.HeadObjectInput{
+	resp, err := r.s3Client.GetObject(&s3.GetObjectInput{
 		Bucket:          aws.String(r.bucketName),
 		IfModifiedSince: &modifiedSince,
-		Key:             aws.String(key),
+		Key:             aws.String(r.key),
 	})
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
-			case "NotFound":
+			case s3.ErrCodeNoSuchKey:
+				return "", nil
 			case "NotModified":
 				return "", nil
 			default:
@@ -85,7 +86,12 @@ func (r *CachingS3Reader) fetchFromS3(key string) (string, error) {
 		}
 		return "", err
 	}
-	return key, nil
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	return string(body), nil
 }
 
 func modifiedSinceSeconds(cacheDurationInSeconds int) time.Time {
@@ -93,7 +99,7 @@ func modifiedSinceSeconds(cacheDurationInSeconds int) time.Time {
 	return time.Now().Add(negative)
 }
 
-func (r *CachingS3Reader) cacheItem(key string, item string) error {
+func (r CachingS3Reader) cacheItem(key string, item string) error {
 	_, err := r.s3Client.PutObject(&s3.PutObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
