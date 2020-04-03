@@ -5,6 +5,15 @@ import (
 	"io"
 	"io/ioutil"
 	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go/aws/awserr"
+
+	"github.com/aws/aws-sdk-go/aws"
+
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 )
 
 type CachingS3Reader struct {
@@ -12,14 +21,20 @@ type CachingS3Reader struct {
 	key          string
 	originReader func() (string, error)
 	done         bool
+	s3Client     s3iface.S3API
+	cacheSeconds int
 }
 
-func NewReader(bucketName, key string, originFunc func() (string, error)) *CachingS3Reader {
+func NewReader(bucketName, key string, originFunc func() (string, error), cacheSeconds int) *CachingS3Reader {
+	sess := session.Must(session.NewSession())
+	s3Client := s3.New(sess)
 	return &CachingS3Reader{
 		bucketName:   bucketName,
 		key:          key,
 		originReader: originFunc,
 		done:         false,
+		s3Client:     s3Client,
+		cacheSeconds: cacheSeconds,
 	}
 }
 
@@ -27,7 +42,7 @@ func (r *CachingS3Reader) Read(p []byte) (n int, err error) {
 	if r.done {
 		return 0, io.EOF
 	}
-	item, err := fetchFromCache(r.key)
+	item, err := r.fetchFromS3(r.key)
 	if err != nil {
 		return 0, err
 	}
@@ -41,32 +56,65 @@ func (r *CachingS3Reader) Read(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	err = cacheItem(r.key, originItem)
+	err = r.cacheItem(r.key, originItem)
 	if err != nil {
-		return 0, nil
+		fmt.Println("failed to write to cache")
 	}
+	r.done = true
 	stringReader := strings.NewReader(originItem)
 	return stringReader.Read(p)
 }
 
-func cacheItem(key string, item string) error {
-	// TODO
-	// - implement write PutObject to S3 with key
-	return nil
+func (r *CachingS3Reader) fetchFromS3(key string) (string, error) {
+	modifiedSince := modifiedSinceSeconds(r.cacheSeconds)
+	_, err := r.s3Client.HeadObject(&s3.HeadObjectInput{
+		Bucket:          aws.String(r.bucketName),
+		IfModifiedSince: &modifiedSince,
+		Key:             aws.String(key),
+	})
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case "NotFound":
+			case "NotModified":
+				return "", nil
+			default:
+				fmt.Println(aerr.Error())
+				return "", aerr
+			}
+		}
+		return "", err
+	}
+	return key, nil
 }
 
-func fetchFromCache(key string) (string, error) {
-	// TODO
-	// - implement HeadObject from S3 with If-Modified-Since = N minutes
-	// - return error? if s3 answers: 304 (not modified)
-	return key, nil
+func modifiedSinceSeconds(cacheDurationInSeconds int) time.Time {
+	negative := time.Duration(cacheDurationInSeconds*-1) * time.Second
+	return time.Now().Add(negative)
+}
+
+func (r *CachingS3Reader) cacheItem(key string, item string) error {
+	_, err := r.s3Client.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(r.bucketName),
+		Key:    aws.String(key),
+		Body:   aws.ReadSeekCloser(strings.NewReader(item)),
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {
 	originFunc := func() (string, error) {
-		return "", nil
+		return fmt.Sprintf("something from origin at: %s", time.Now().String()), nil
 	}
-	r := NewReader("my-cache-bucket", "my-key-generated-from-some-input", originFunc)
+	r := NewReader(
+		"s3-caching-reader-test-bucket",
+		"my-key-generated-from-some-input",
+		originFunc,
+		10,
+	)
 
 	all, err := ioutil.ReadAll(r)
 	if err != nil {
