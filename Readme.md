@@ -1,5 +1,7 @@
 # S3 Caching Reader
 
+![](https://github.com/superluminar-io/s3-caching-reader/workflows/Go/badge.svg)
+
 S3 Caching Reader is a Go module that allows to use S3 as caching backend.
 
 ## Installation
