@@ -38,10 +38,10 @@ func (c S3ClientMock) GetObject(input *s3.GetObjectInput) (*s3.GetObjectOutput, 
 func TestCachingS3Reader(t *testing.T) {
 	RegisterFailHandler(Fail)
 
-	RunSpecs(t, "CachingS3Reader Suite")
+	RunSpecs(t, "S3CachingReader Suite")
 }
 
-var _ = Describe("CachingS3Reader", func() {
+var _ = Describe("S3CachingReader", func() {
 	var (
 		bucketName   string
 		key          string
@@ -51,8 +51,8 @@ var _ = Describe("CachingS3Reader", func() {
 		s3Client     S3ClientMock
 		output       []byte
 		err          error
-		aReader      = func() *CachingS3Reader {
-			return &CachingS3Reader{
+		aReader      = func() *S3CachingReader {
+			return &S3CachingReader{
 				bucketName:   bucketName,
 				key:          key,
 				originReader: originReader,

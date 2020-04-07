@@ -16,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 )
 
-type CachingS3Reader struct {
+type S3CachingReader struct {
 	bucketName   string
 	key          string
 	originReader func() (string, error)
@@ -25,10 +25,10 @@ type CachingS3Reader struct {
 	cacheSeconds int
 }
 
-func NewReader(bucketName, key string, originFunc func() (string, error), cacheSeconds int) *CachingS3Reader {
+func NewReader(bucketName, key string, originFunc func() (string, error), cacheSeconds int) *S3CachingReader {
 	sess := session.Must(session.NewSession())
 	s3Client := s3.New(sess)
-	return &CachingS3Reader{
+	return &S3CachingReader{
 		bucketName:   bucketName,
 		key:          key,
 		originReader: originFunc,
@@ -38,7 +38,7 @@ func NewReader(bucketName, key string, originFunc func() (string, error), cacheS
 	}
 }
 
-func (r *CachingS3Reader) Read(p []byte) (n int, err error) {
+func (r *S3CachingReader) Read(p []byte) (n int, err error) {
 	if r.done {
 		return 0, io.EOF
 	}
@@ -65,7 +65,7 @@ func (r *CachingS3Reader) Read(p []byte) (n int, err error) {
 	return stringReader.Read(p)
 }
 
-func (r CachingS3Reader) fetchFromS3() (string, error) {
+func (r S3CachingReader) fetchFromS3() (string, error) {
 	modifiedSince := modifiedSinceSeconds(r.cacheSeconds)
 	resp, err := r.s3Client.GetObject(&s3.GetObjectInput{
 		Bucket:          aws.String(r.bucketName),
@@ -99,7 +99,7 @@ func modifiedSinceSeconds(cacheDurationInSeconds int) time.Time {
 	return time.Now().Add(negative)
 }
 
-func (r CachingS3Reader) cacheItem(key string, item string) error {
+func (r S3CachingReader) cacheItem(key string, item string) error {
 	_, err := r.s3Client.PutObject(&s3.PutObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
