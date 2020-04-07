@@ -25,9 +25,13 @@ type S3CachingReader struct {
 	cacheSeconds int
 }
 
-func NewReader(bucketName, key string, originFunc func() (string, error), cacheSeconds int) *S3CachingReader {
-	sess := session.Must(session.NewSession())
-	s3Client := s3.New(sess)
+func NewReader(
+	bucketName string,
+	key string,
+	originFunc func() (string, error),
+	cacheSeconds int,
+	s3Client s3iface.S3API,
+) *S3CachingReader {
 	return &S3CachingReader{
 		bucketName:   bucketName,
 		key:          key,
@@ -115,11 +119,14 @@ func main() {
 	originFunc := func() (string, error) {
 		return fmt.Sprintf("something from origin at: %s", time.Now().String()), nil
 	}
+	sess := session.Must(session.NewSession())
+	s3Client := s3.New(sess)
 	r := NewReader(
 		"s3-caching-reader-test-bucket",
 		"my-key-generated-from-some-input",
 		originFunc,
 		10,
+		s3Client,
 	)
 
 	all, err := ioutil.ReadAll(r)
